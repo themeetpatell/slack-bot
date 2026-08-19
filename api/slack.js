@@ -140,8 +140,8 @@ async function createZohoDeal(d) {
     Email: d.email,
     Phone: d.phone,
     Service_List: d.services.map((s) => s.v),
-    Internal_Referrer: d.referrer,
   };
+  if (d.referrer) record.Internal_Referrer = d.referrer;
   if (d.client) record.Referring_Client = d.client;
 
   const body = { data: [record] };
@@ -165,11 +165,11 @@ async function createZohoDeal(d) {
 
 // ---------- Slack views ----------
 
-function referFormView(channelId, referrerPrefill) {
+function referFormView(channelId, referrerName) {
   return {
     type: 'modal',
     callback_id: 'lead_form',
-    private_metadata: JSON.stringify({ channel: channelId }),
+    private_metadata: JSON.stringify({ channel: channelId, referrer: referrerName }),
     title: { type: 'plain_text', text: 'New Referral' },
     submit: { type: 'plain_text', text: 'Review' },
     close: { type: 'plain_text', text: 'Cancel' },
@@ -232,16 +232,13 @@ function referFormView(channelId, referrerPrefill) {
         },
       },
       {
-        type: 'input',
-        block_id: 'referrer',
-        label: { type: 'plain_text', text: 'Your Name' },
-        hint: { type: 'plain_text', text: 'Saved as Internal Referrer on the deal' },
-        element: {
-          type: 'plain_text_input',
-          action_id: 'v',
-          placeholder: { type: 'plain_text', text: 'e.g. Meet Patel' },
-          ...(referrerPrefill ? { initial_value: referrerPrefill } : {}),
-        },
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: `:bust_in_silhouette: Referred by *${referrerName}* — captured automatically from your Slack profile.`,
+          },
+        ],
       },
     ],
   };
@@ -360,7 +357,6 @@ function extractFormValues(payload) {
     t: o.text.text,
     v: o.value,
   }));
-  const referrer = ((vals.referrer && vals.referrer.v.value) || '').trim();
   const client = ((vals.client && vals.client.v.value) || '').trim();
 
   const errors = {};
@@ -369,9 +365,8 @@ function extractFormValues(payload) {
   if (!/^\+?\d{7,15}$/.test(phone))
     errors.phone = 'Enter a valid phone number, e.g. +9715XXXXXXXX.';
   if (services.length === 0) errors.services = 'Select at least one service.';
-  if (referrer.length < 2) errors.referrer = 'Enter your full name.';
 
-  return { name, email, phone, services, referrer, client, errors };
+  return { name, email, phone, services, client, errors };
 }
 
 async function handleViewSubmission(payload, res) {
@@ -379,7 +374,7 @@ async function handleViewSubmission(payload, res) {
 
   if (cb === 'lead_form') {
     const meta = JSON.parse(payload.view.private_metadata || '{}');
-    const { name, email, phone, services, referrer, client, errors } = extractFormValues(payload);
+    const { name, email, phone, services, client, errors } = extractFormValues(payload);
     if (Object.keys(errors).length > 0) {
       return json(res, 200, { response_action: 'errors', errors });
     }
@@ -388,7 +383,7 @@ async function handleViewSubmission(payload, res) {
       email,
       phone,
       services,
-      referrer,
+      referrer: meta.referrer || '',
       client,
       channel: meta.channel || '',
       user: payload.user.id,
