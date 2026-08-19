@@ -11,6 +11,7 @@ const ZOHO_API_URL = process.env.ZOHO_API_URL || 'https://www.zohoapis.com';
 const LEAD_SOURCE = process.env.LEAD_SOURCE || 'Ops Team';
 const LEAD_STATUS = process.env.LEAD_STATUS || 'New (Incoming)';
 const ASSIGNMENT_RULE_ID = process.env.ZOHO_ASSIGNMENT_RULE_ID || '';
+const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
 
 // Services_List picklist pulled from the live Finanshels Zoho CRM (Leads module).
 // t = display label shown in Slack, v = Zoho actual_value sent to the API.
@@ -267,6 +268,14 @@ function resultView(title, message) {
 async function handleSlashCommand(params, res) {
   const triggerId = params.get('trigger_id');
   const channelId = params.get('channel_id');
+
+  if (SLACK_CHANNEL_ID && channelId !== SLACK_CHANNEL_ID) {
+    return json(res, 200, {
+      response_type: 'ephemeral',
+      text: `:warning: The \`/lead\` command is restricted to <#${SLACK_CHANNEL_ID}>. Please run it there.`,
+    });
+  }
+
   const open = await slackCall('views.open', {
     trigger_id: triggerId,
     view: leadFormView(channelId),
@@ -331,8 +340,9 @@ async function handleViewSubmission(payload, res) {
         `*${d.name}* · ${d.services.map((s) => s.t).join(', ')}\n` +
         `${d.email} · ${d.phone}\n` +
         `Lead ID: \`${leadId}\``;
-      // Post to the channel where /lead was run; fall back to a DM.
-      let posted = await slackCall('chat.postMessage', { channel: d.channel, text: summary });
+      // Post to the configured SLACK_CHANNEL_ID or falling back to channel where /lead was run / DM.
+      const targetChannel = SLACK_CHANNEL_ID || d.channel;
+      let posted = await slackCall('chat.postMessage', { channel: targetChannel, text: summary });
       if (!posted.ok) {
         posted = await slackCall('chat.postMessage', { channel: d.user, text: summary });
       }
