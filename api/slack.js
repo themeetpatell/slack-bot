@@ -1,4 +1,4 @@
-// /refer — Slack slash command → form modal → confirm screen → Zoho CRM lead
+// /refer — Slack slash command → form modal → confirm screen → Zoho CRM deal
 // Zero dependencies. Node 18+. Deployed as a Vercel serverless function.
 // IMPORTANT: set NODEJS_HELPERS=0 in Vercel env so the raw body is available
 // for Slack signature verification.
@@ -9,16 +9,17 @@ const SLACK_API = 'https://slack.com/api';
 const ACCOUNTS_URL = process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com';
 const ZOHO_API_URL = process.env.ZOHO_API_URL || 'https://www.zohoapis.com';
 const LEAD_SOURCE = process.env.LEAD_SOURCE || 'Ops Team';
-const LEAD_STATUS = process.env.LEAD_STATUS || 'New (Incoming)';
-const ASSIGNMENT_RULE_ID = process.env.ZOHO_ASSIGNMENT_RULE_ID || '';
+const DEAL_STAGE = process.env.DEAL_STAGE || 'Qualification';
+const DEAL_PIPELINE = process.env.DEAL_PIPELINE || 'General Sales';
+const DEAL_ASSIGNMENT_RULE_ID = process.env.ZOHO_DEAL_ASSIGNMENT_RULE_ID || '';
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
 
-// Services_List picklist pulled from the live Finanshels Zoho CRM (Leads module).
+// Service_List picklist pulled from the live Finanshels Zoho CRM (Deals module).
 // t = display label shown in Slack, v = Zoho actual_value sent to the API.
 // If you add/rename services in Zoho, update this list to match.
 const SERVICES = [
   { t: 'Accounting & Bookkeeping', v: 'Accounting & Bookkeeping' },
-  { t: 'Accounting & Tax Compliance', v: 'Accounting' },
+  { t: 'Accounting & Tax Compliance', v: 'Accounting & Tax Compliance' },
   { t: 'Accounting for AML-Registered Businesses', v: 'Accounting for AML-Registered Businesses' },
   { t: 'Accounting Software Setup', v: 'Accounting Software Setup' },
   { t: 'Accounting, VAT and CT Filing', v: 'Accounting, VAT and CT Filing' },
@@ -27,14 +28,14 @@ const SERVICES = [
   { t: 'AML Compliance Catch-Up', v: 'AML Compliance Catch-Up' },
   { t: 'AML Registration & Initial Setup', v: 'AML Registration & Initial Setup' },
   { t: 'AML Screening', v: 'AML Screening' },
-  { t: 'Annual Accounting Package', v: 'Essential Annual Accounting' },
-  { t: 'Audit Services', v: 'Auditing' },
+  { t: 'Annual Accounting Package', v: 'Annual Accounting Package' },
+  { t: 'Audit Services', v: 'Audit Services' },
   { t: 'Audited Financial Statements', v: 'Audited Financial Statements' },
   { t: 'Bank Account Opening', v: 'Bank Account Opening' },
   { t: 'Books Cleanup & Catch-Up Accounting', v: 'Books Cleanup & Catch-Up Accounting' },
   { t: 'CFO Services', v: 'CFO Services' },
-  { t: 'Corporate Tax De-registration', v: 'Corporate Tax Deregistration' },
-  { t: 'Corporate Tax Filing', v: 'Corporate Tax Filing - Essential' },
+  { t: 'Corporate Tax De-registration', v: 'Corporate Tax De-registration' },
+  { t: 'Corporate Tax Filing', v: 'Corporate Tax Filing' },
   { t: 'Corporate Tax Filing - Growth', v: 'Corporate Tax Filing - Growth' },
   { t: 'Corporate Tax Filing - SBR', v: 'Corporate Tax Filing - SBR' },
   { t: 'Corporate Tax Filing - Scale', v: 'Corporate Tax Filing - Scale' },
@@ -45,22 +46,23 @@ const SERVICES = [
   { t: 'Financial Modelling', v: 'Financial Modelling' },
   { t: 'Financial Statement Preparation', v: 'Financial Statement Preparation' },
   { t: 'FinCore General', v: 'FinCore General' },
-  { t: 'Fractional CFO Services', v: 'Fractional CFO - hourly' },
+  { t: 'Fractional CFO Services', v: 'Fractional CFO Services' },
   { t: 'FTA Amendments', v: 'FTA Amendments' },
   { t: 'Liquidation', v: 'Liquidation' },
   { t: 'Management Accounting', v: 'Management Accounting' },
-  { t: 'Monthly Accounting', v: 'Scale Monthly Accounting' },
-  { t: 'Partnership Inquiry', v: 'Looking for Partnership' },
-  { t: 'Quarterly Accounting', v: 'Growth Quarterly Accounting' },
+  { t: 'Monthly Accounting', v: 'Monthly Accounting' },
+  { t: 'Quarterly Accounting', v: 'Quarterly Accounting' },
   { t: 'Salary Benchmarking', v: 'Salary Benchmarking' },
   { t: 'Tax Compliance Services', v: 'Tax Compliance Services' },
   { t: 'Tax Residency Certificate (TRC)', v: 'Tax Residency Certificate (TRC)' },
-  { t: 'Transfer Pricing Report', v: 'Transfer Pricing Report' },
-  { t: 'VAT De-registration', v: 'VAT Deregistration' },
-  { t: 'VAT Filing', v: 'VAT Filing - 1000txn' },
+  // Zoho's actual_value has a typo ("Repor"); it must be sent as-is.
+  { t: 'Transfer Pricing Report', v: 'Transfer Pricing Repor' },
+  { t: 'VAT De-registration', v: 'VAT De-registration' },
+  { t: 'VAT Filing', v: 'VAT Filing' },
   { t: 'VAT Filing - 100txn', v: 'VAT Filing - 100txn' },
   { t: 'VAT Filing - 500txn', v: 'VAT Filing - 500txn' },
   { t: 'VAT Registration', v: 'VAT Registration' },
+  { t: 'Virtual CFO Services', v: 'Virtual CFO Services' },
 ];
 
 // ---------- helpers ----------
@@ -127,27 +129,25 @@ async function zohoAccessToken() {
   return j.access_token;
 }
 
-async function createZohoLead(d) {
+async function createZohoDeal(d) {
   const token = await zohoAccessToken();
-  const parts = d.name.trim().split(/\s+/);
-  const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-  const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
 
   const record = {
-    Last_Name: lastName,
+    Deal_Name: d.name,
+    Stage: DEAL_STAGE,
+    Pipeline: DEAL_PIPELINE,
+    Lead_Source: LEAD_SOURCE,
     Email: d.email,
     Phone: d.phone,
-    Lead_Source: LEAD_SOURCE,
-    Lead_Status: LEAD_STATUS,
-    Services_List: d.services.map((s) => s.v),
+    Service_List: d.services.map((s) => s.v),
     Internal_Referrer: d.referrer,
   };
-  if (firstName) record.First_Name = firstName;
+  if (d.client) record.Referring_Client = d.client;
 
   const body = { data: [record] };
-  if (ASSIGNMENT_RULE_ID) body.lar_id = ASSIGNMENT_RULE_ID;
+  if (DEAL_ASSIGNMENT_RULE_ID) body.lar_id = DEAL_ASSIGNMENT_RULE_ID;
 
-  const r = await fetch(`${ZOHO_API_URL}/crm/v6/Leads`, {
+  const r = await fetch(`${ZOHO_API_URL}/crm/v6/Deals`, {
     method: 'POST',
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
@@ -158,26 +158,27 @@ async function createZohoLead(d) {
   const j = await r.json();
   const item = j.data && j.data[0];
   if (!item || item.status !== 'success') {
-    throw new Error(`Zoho rejected the lead: ${JSON.stringify((item && item.message) || j)}`);
+    throw new Error(`Zoho rejected the deal: ${JSON.stringify((item && item.message) || j)}`);
   }
   return item.details.id;
 }
 
 // ---------- Slack views ----------
 
-function leadFormView(channelId) {
+function referFormView(channelId) {
   return {
     type: 'modal',
     callback_id: 'lead_form',
     private_metadata: JSON.stringify({ channel: channelId }),
-    title: { type: 'plain_text', text: 'New Lead' },
+    title: { type: 'plain_text', text: 'New Referral' },
     submit: { type: 'plain_text', text: 'Review' },
     close: { type: 'plain_text', text: 'Cancel' },
     blocks: [
       {
         type: 'input',
         block_id: 'name',
-        label: { type: 'plain_text', text: 'Customer Name' },
+        label: { type: 'plain_text', text: 'Client Name' },
+        hint: { type: 'plain_text', text: 'The deal will be created with this name' },
         element: {
           type: 'plain_text_input',
           action_id: 'v',
@@ -220,9 +221,21 @@ function leadFormView(channelId) {
       },
       {
         type: 'input',
+        block_id: 'client',
+        optional: true,
+        label: { type: 'plain_text', text: 'Referring client name' },
+        hint: { type: 'plain_text', text: 'Existing client who is referring this deal — leave blank if none' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'v',
+          placeholder: { type: 'plain_text', text: 'e.g. Acme Trading LLC' },
+        },
+      },
+      {
+        type: 'input',
         block_id: 'referrer',
         label: { type: 'plain_text', text: 'Full name' },
-        hint: { type: 'plain_text', text: 'Your name — saved as Internal Referrer on the lead' },
+        hint: { type: 'plain_text', text: 'Your name — saved as Internal Referrer on the deal' },
         element: {
           type: 'plain_text_input',
           action_id: 'v',
@@ -238,7 +251,7 @@ function confirmView(d) {
     type: 'modal',
     callback_id: 'lead_confirm',
     private_metadata: JSON.stringify(d),
-    title: { type: 'plain_text', text: 'Confirm Lead' },
+    title: { type: 'plain_text', text: 'Confirm Referral' },
     submit: { type: 'plain_text', text: 'Create in Zoho' },
     close: { type: 'plain_text', text: 'Cancel' },
     blocks: [
@@ -247,10 +260,11 @@ function confirmView(d) {
         text: {
           type: 'mrkdwn',
           text:
-            `*Customer:* ${d.name}\n` +
+            `*Client:* ${d.name}\n` +
             `*Email:* ${d.email}\n` +
             `*Phone:* ${d.phone}\n` +
             `*Service(s):* ${d.services.map((s) => s.t).join(', ')}\n` +
+            (d.client ? `*Referring client:* ${d.client}\n` : '') +
             `*Referred by:* ${d.referrer}`,
         },
       },
@@ -259,7 +273,7 @@ function confirmView(d) {
         elements: [
           {
             type: 'mrkdwn',
-            text: `Will be created as a Lead in Zoho CRM · Source: ${LEAD_SOURCE} · Status: ${LEAD_STATUS}`,
+            text: `Will be created as a Deal in Zoho CRM · Pipeline: ${DEAL_PIPELINE} · Stage: ${DEAL_STAGE} · Source: ${LEAD_SOURCE}`,
           },
         ],
       },
@@ -298,12 +312,12 @@ async function handleSlashCommand(params, res) {
 
   const open = await slackCall('views.open', {
     trigger_id: triggerId,
-    view: leadFormView(channelId),
+    view: referFormView(channelId),
   });
   if (!open.ok) {
     return json(res, 200, {
       response_type: 'ephemeral',
-      text: `Could not open the lead form (${open.error}). Check the bot's scopes and reinstall the app.`,
+      text: `Could not open the referral form (${open.error}). Check the bot's scopes and reinstall the app.`,
     });
   }
   res.statusCode = 200;
@@ -321,16 +335,17 @@ function extractFormValues(payload) {
     v: o.value,
   }));
   const referrer = ((vals.referrer && vals.referrer.v.value) || '').trim();
+  const client = ((vals.client && vals.client.v.value) || '').trim();
 
   const errors = {};
-  if (name.length < 2) errors.name = 'Enter the customer name.';
+  if (name.length < 2) errors.name = 'Enter the client name.';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Enter a valid email address.';
   if (!/^\+?\d{7,15}$/.test(phone))
     errors.phone = 'Enter a valid phone number, e.g. +9715XXXXXXXX.';
   if (services.length === 0) errors.services = 'Select at least one service.';
   if (referrer.length < 2) errors.referrer = 'Enter your full name.';
 
-  return { name, email, phone, services, referrer, errors };
+  return { name, email, phone, services, referrer, client, errors };
 }
 
 async function handleViewSubmission(payload, res) {
@@ -338,7 +353,7 @@ async function handleViewSubmission(payload, res) {
 
   if (cb === 'lead_form') {
     const meta = JSON.parse(payload.view.private_metadata || '{}');
-    const { name, email, phone, services, referrer, errors } = extractFormValues(payload);
+    const { name, email, phone, services, referrer, client, errors } = extractFormValues(payload);
     if (Object.keys(errors).length > 0) {
       return json(res, 200, { response_action: 'errors', errors });
     }
@@ -348,6 +363,7 @@ async function handleViewSubmission(payload, res) {
       phone,
       services,
       referrer,
+      client,
       channel: meta.channel || '',
       user: payload.user.id,
     };
@@ -357,8 +373,21 @@ async function handleViewSubmission(payload, res) {
   if (cb === 'lead_confirm') {
     const d = JSON.parse(payload.view.private_metadata);
     try {
-      const leadId = await createZohoLead(d);
+      const dealId = await createZohoDeal(d);
       const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>)`;
+      const summaryFields = [
+        { type: 'mrkdwn', text: `*Client:*\n${d.name}` },
+        { type: 'mrkdwn', text: `*Referred by:*\n${d.referrer}` },
+        { type: 'mrkdwn', text: `*Email:*\n${d.email}` },
+        { type: 'mrkdwn', text: `*Phone:*\n${d.phone}` },
+        {
+          type: 'mrkdwn',
+          text: `*Service(s):*\n${d.services.map((s) => s.t).join(', ')}`,
+        },
+      ];
+      if (d.client) {
+        summaryFields.push({ type: 'mrkdwn', text: `*Referring client:*\n${d.client}` });
+      }
       const summaryBlocks = [
         {
           type: 'section',
@@ -367,25 +396,13 @@ async function handleViewSubmission(payload, res) {
             text: `:tada: *New referral submitted* by <@${d.user}>`,
           },
         },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: `*Customer:*\n${d.name}` },
-            { type: 'mrkdwn', text: `*Referred by:*\n${d.referrer}` },
-            { type: 'mrkdwn', text: `*Email:*\n${d.email}` },
-            { type: 'mrkdwn', text: `*Phone:*\n${d.phone}` },
-            {
-              type: 'mrkdwn',
-              text: `*Service(s):*\n${d.services.map((s) => s.t).join(', ')}`,
-            },
-          ],
-        },
+        { type: 'section', fields: summaryFields },
         {
           type: 'context',
           elements: [
             {
               type: 'mrkdwn',
-              text: `Created in Zoho CRM · Lead ID \`${leadId}\` · Source: ${LEAD_SOURCE}`,
+              text: `Created as a Deal in Zoho CRM · Deal ID \`${dealId}\` · ${DEAL_PIPELINE} / ${DEAL_STAGE}`,
             },
           ],
         },
@@ -407,8 +424,8 @@ async function handleViewSubmission(payload, res) {
       return json(res, 200, {
         response_action: 'update',
         view: resultView(
-          'Lead Created',
-          `:white_check_mark: *${d.name}* is now in Zoho CRM.\nLead ID: \`${leadId}\`${note}`
+          'Deal Created',
+          `:white_check_mark: *${d.name}* is now a Deal in Zoho CRM.\nDeal ID: \`${dealId}\`${note}`
         ),
       });
     } catch (err) {
@@ -416,7 +433,7 @@ async function handleViewSubmission(payload, res) {
         response_action: 'update',
         view: resultView(
           'Error',
-          `:x: The lead was *not* created.\n\`\`\`${String(err.message).slice(0, 500)}\`\`\`\nFix the issue and run \`/refer\` again.`
+          `:x: The deal was *not* created.\n\`\`\`${String(err.message).slice(0, 500)}\`\`\`\nFix the issue and run \`/refer\` again.`
         ),
       });
     }
