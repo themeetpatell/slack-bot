@@ -1,0 +1,40 @@
+{
+  "display_information": {
+    "name": "Finanshels Lead Bot",
+    "description": "Create Zoho CRM leads from Slack with /lead",
+    "background_color": "#1a3c34"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "leadbot",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/lead",
+        "url": "https://slack-lead-bot.vercel.app/api/slack",
+        "description": "Create a lead in Zoho CRM",
+        "usage_hint": "opens a lead form",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "commands",
+        "chat:write",
+        "chat:write.public"
+      ]
+    }
+  },
+  "settings": {
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://slack-lead-bot.vercel.app/api/slack"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
