@@ -1,6 +1,6 @@
-# Finanshels Lead Bot — `/lead` in Slack → Lead in Zoho CRM
+# Finanshels Lead Bot — `/refer` in Slack → Lead in Zoho CRM
 
-Anyone in the FinOps Slack channel types `/lead`, fills a form (Customer Name, Email, Phone, Service), reviews a confirmation screen, taps **Create in Zoho**, and the lead lands in Zoho CRM. A confirmation message posts back to the channel with the Lead ID.
+Anyone in the FinOps Slack channel types `/refer`, fills a form (Customer Name, Email, Phone, Service), reviews a confirmation screen, taps **Create in Zoho**, and the lead lands in Zoho CRM. A confirmation message posts back to the channel with the Lead ID.
 
 Field mapping (matches the live Finanshels Zoho Leads module):
 
@@ -64,7 +64,7 @@ Save the `refresh_token` from the response. It does not expire.
 Redeploy after adding the vars so they take effect.
 
 ### 5. Test
-1. In any channel: `/lead` → form opens.
+1. In channel: `/refer` → form opens.
 2. Enter a test lead (use a clearly fake name like "Slack Test Delete"), pick a service, tap **Review** → confirmation screen → **Create in Zoho**.
 3. Verify: success modal with Lead ID, channel message posted, lead visible in Zoho with Source = Ops Team, Status = New (Incoming), correct Services_List values.
 4. Delete the test lead in Zoho.

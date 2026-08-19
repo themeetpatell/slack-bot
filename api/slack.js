@@ -1,4 +1,4 @@
-// /lead — Slack slash command → form modal → confirm screen → Zoho CRM lead
+// /refer — Slack slash command → form modal → confirm screen → Zoho CRM lead
 // Zero dependencies. Node 18+. Deployed as a Vercel serverless function.
 // IMPORTANT: set NODEJS_HELPERS=0 in Vercel env so the raw body is available
 // for Slack signature verification.
@@ -268,11 +268,18 @@ function resultView(title, message) {
 async function handleSlashCommand(params, res) {
   const triggerId = params.get('trigger_id');
   const channelId = params.get('channel_id');
+  const channelName = params.get('channel_name');
 
-  if (SLACK_CHANNEL_ID && channelId !== SLACK_CHANNEL_ID) {
+  if (
+    SLACK_CHANNEL_ID &&
+    channelId !== SLACK_CHANNEL_ID &&
+    channelName !== SLACK_CHANNEL_ID &&
+    `#${channelName}` !== SLACK_CHANNEL_ID
+  ) {
+    const channelDisplay = SLACK_CHANNEL_ID.startsWith('C') ? `<#${SLACK_CHANNEL_ID}>` : `#${SLACK_CHANNEL_ID}`;
     return json(res, 200, {
       response_type: 'ephemeral',
-      text: `:warning: The \`/lead\` command is restricted to <#${SLACK_CHANNEL_ID}>. Please run it there.`,
+      text: `:warning: The \`/refer\` command is restricted to ${channelDisplay}. Please run it there.`,
     });
   }
 
@@ -361,7 +368,7 @@ async function handleViewSubmission(payload, res) {
         response_action: 'update',
         view: resultView(
           'Error',
-          `:x: The lead was *not* created.\n\`\`\`${String(err.message).slice(0, 500)}\`\`\`\nFix the issue and run \`/lead\` again.`
+          `:x: The lead was *not* created.\n\`\`\`${String(err.message).slice(0, 500)}\`\`\`\nFix the issue and run \`/refer\` again.`
         ),
       });
     }
@@ -397,7 +404,7 @@ module.exports = async (req, res) => {
   }
 
   // Slash command
-  if (params.get('command') === '/lead') return handleSlashCommand(params, res);
+  if (params.get('command') === '/refer' || params.get('command') === '/lead') return handleSlashCommand(params, res);
 
   res.statusCode = 200;
   return res.end('');
