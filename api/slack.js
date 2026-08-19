@@ -165,7 +165,7 @@ async function createZohoDeal(d) {
 
 // ---------- Slack views ----------
 
-function referFormView(channelId) {
+function referFormView(channelId, referrerPrefill) {
   return {
     type: 'modal',
     callback_id: 'lead_form',
@@ -234,12 +234,13 @@ function referFormView(channelId) {
       {
         type: 'input',
         block_id: 'referrer',
-        label: { type: 'plain_text', text: 'Full name' },
-        hint: { type: 'plain_text', text: 'Your name — saved as Internal Referrer on the deal' },
+        label: { type: 'plain_text', text: 'Your Name' },
+        hint: { type: 'plain_text', text: 'Saved as Internal Referrer on the deal' },
         element: {
           type: 'plain_text_input',
           action_id: 'v',
           placeholder: { type: 'plain_text', text: 'e.g. Meet Patel' },
+          ...(referrerPrefill ? { initial_value: referrerPrefill } : {}),
         },
       },
     ],
@@ -292,6 +293,30 @@ function resultView(title, message) {
 
 // ---------- handlers ----------
 
+// Best-effort full name of the sender: Slack profile (needs users:read scope),
+// falling back to the slash-command username ("meet.patel" → "Meet Patel").
+async function senderFullName(userId, userName) {
+  try {
+    // users.info is a read method — it takes URL params, not a JSON body.
+    const r = await fetch(`${SLACK_API}/users.info?user=${encodeURIComponent(userId)}`, {
+      headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+    });
+    const info = await r.json();
+    if (info.ok) {
+      const p = info.user.profile || {};
+      const name = p.real_name || p.display_name || info.user.real_name || '';
+      if (name.trim()) return name.trim();
+    }
+  } catch {
+    // fall through to username fallback
+  }
+  return (userName || '')
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 async function handleSlashCommand(params, res) {
   const triggerId = params.get('trigger_id');
   const channelId = params.get('channel_id');
@@ -310,9 +335,10 @@ async function handleSlashCommand(params, res) {
     });
   }
 
+  const prefill = await senderFullName(params.get('user_id'), params.get('user_name'));
   const open = await slackCall('views.open', {
     trigger_id: triggerId,
-    view: referFormView(channelId),
+    view: referFormView(channelId, prefill),
   });
   if (!open.ok) {
     return json(res, 200, {

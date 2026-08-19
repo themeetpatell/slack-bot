@@ -24,7 +24,8 @@
       "bot": [
         "commands",
         "chat:write",
-        "chat:write.public"
+        "chat:write.public",
+        "users:read"
       ]
     }
   },
