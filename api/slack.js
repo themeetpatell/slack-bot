@@ -140,6 +140,7 @@ async function createZohoLead(d) {
     Lead_Source: LEAD_SOURCE,
     Lead_Status: LEAD_STATUS,
     Services_List: d.services.map((s) => s.v),
+    Internal_Referrer: d.referrer,
   };
   if (firstName) record.First_Name = firstName;
 
@@ -217,6 +218,17 @@ function leadFormView(channelId) {
           })),
         },
       },
+      {
+        type: 'input',
+        block_id: 'referrer',
+        label: { type: 'plain_text', text: 'Full name' },
+        hint: { type: 'plain_text', text: 'Your name — saved as Internal Referrer on the lead' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'v',
+          placeholder: { type: 'plain_text', text: 'e.g. Meet Patel' },
+        },
+      },
     ],
   };
 }
@@ -238,7 +250,8 @@ function confirmView(d) {
             `*Customer:* ${d.name}\n` +
             `*Email:* ${d.email}\n` +
             `*Phone:* ${d.phone}\n` +
-            `*Service(s):* ${d.services.map((s) => s.t).join(', ')}`,
+            `*Service(s):* ${d.services.map((s) => s.t).join(', ')}\n` +
+            `*Referred by:* ${d.referrer}`,
         },
       },
       {
@@ -307,6 +320,7 @@ function extractFormValues(payload) {
     t: o.text.text,
     v: o.value,
   }));
+  const referrer = ((vals.referrer && vals.referrer.v.value) || '').trim();
 
   const errors = {};
   if (name.length < 2) errors.name = 'Enter the customer name.';
@@ -314,8 +328,9 @@ function extractFormValues(payload) {
   if (!/^\+?\d{7,15}$/.test(phone))
     errors.phone = 'Enter a valid phone number, e.g. +9715XXXXXXXX.';
   if (services.length === 0) errors.services = 'Select at least one service.';
+  if (referrer.length < 2) errors.referrer = 'Enter your full name.';
 
-  return { name, email, phone, services, errors };
+  return { name, email, phone, services, referrer, errors };
 }
 
 async function handleViewSubmission(payload, res) {
@@ -323,7 +338,7 @@ async function handleViewSubmission(payload, res) {
 
   if (cb === 'lead_form') {
     const meta = JSON.parse(payload.view.private_metadata || '{}');
-    const { name, email, phone, services, errors } = extractFormValues(payload);
+    const { name, email, phone, services, referrer, errors } = extractFormValues(payload);
     if (Object.keys(errors).length > 0) {
       return json(res, 200, { response_action: 'errors', errors });
     }
@@ -332,6 +347,7 @@ async function handleViewSubmission(payload, res) {
       email,
       phone,
       services,
+      referrer,
       channel: meta.channel || '',
       user: payload.user.id,
     };
@@ -342,20 +358,52 @@ async function handleViewSubmission(payload, res) {
     const d = JSON.parse(payload.view.private_metadata);
     try {
       const leadId = await createZohoLead(d);
-      const summary =
-        `:white_check_mark: *New lead created in Zoho CRM* by <@${d.user}>\n` +
-        `*${d.name}* · ${d.services.map((s) => s.t).join(', ')}\n` +
-        `${d.email} · ${d.phone}\n` +
-        `Lead ID: \`${leadId}\``;
-      // Post to the configured SLACK_CHANNEL_ID or falling back to channel where /lead was run / DM.
-      const targetChannel = SLACK_CHANNEL_ID || d.channel;
-      let posted = await slackCall('chat.postMessage', { channel: targetChannel, text: summary });
-      if (!posted.ok) {
-        posted = await slackCall('chat.postMessage', { channel: d.user, text: summary });
+      const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>)`;
+      const summaryBlocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:tada: *New referral submitted* by <@${d.user}>`,
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*Customer:*\n${d.name}` },
+            { type: 'mrkdwn', text: `*Referred by:*\n${d.referrer}` },
+            { type: 'mrkdwn', text: `*Email:*\n${d.email}` },
+            { type: 'mrkdwn', text: `*Phone:*\n${d.phone}` },
+            {
+              type: 'mrkdwn',
+              text: `*Service(s):*\n${d.services.map((s) => s.t).join(', ')}`,
+            },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `Created in Zoho CRM · Lead ID \`${leadId}\` · Source: ${LEAD_SOURCE}`,
+            },
+          ],
+        },
+      ];
+      // Post to the channel where /refer was run, then the configured channel, then DM the user.
+      const targets = [...new Set([d.channel, SLACK_CHANNEL_ID, d.user].filter(Boolean))];
+      let posted = { ok: false };
+      for (const channel of targets) {
+        posted = await slackCall('chat.postMessage', {
+          channel,
+          text: fallbackText,
+          blocks: summaryBlocks,
+        });
+        if (posted.ok) break;
       }
       const note = posted.ok
         ? ''
-        : '\n\n_Could not post the confirmation message. Invite the bot to the channel with `/invite`._';
+        : `\n\n_Could not post the confirmation message (${posted.error || 'unknown error'}). Invite the bot to the channel with \`/invite @leadbot\`._`;
       return json(res, 200, {
         response_action: 'update',
         view: resultView(
