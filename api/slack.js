@@ -12,7 +12,8 @@ const LEAD_SOURCE = process.env.LEAD_SOURCE || 'Ops Team';
 const DEAL_STAGE = process.env.DEAL_STAGE || 'Qualification';
 const DEAL_PIPELINE = process.env.DEAL_PIPELINE || 'General Sales';
 const DEAL_ASSIGNMENT_RULE_ID = process.env.ZOHO_DEAL_ASSIGNMENT_RULE_ID || '';
-const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
+// #internal-client-refferals — where /refer is allowed and summaries are posted.
+const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || 'C0BRC5SQF1P';
 // Slack user tagged on every new referral to draft and send the proposal (Sneha Dubey).
 const PROPOSAL_OWNER_ID = process.env.PROPOSAL_OWNER_ID || 'U0BHE147ZDG';
 
