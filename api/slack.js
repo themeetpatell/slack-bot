@@ -13,6 +13,8 @@ const DEAL_STAGE = process.env.DEAL_STAGE || 'Qualification';
 const DEAL_PIPELINE = process.env.DEAL_PIPELINE || 'General Sales';
 const DEAL_ASSIGNMENT_RULE_ID = process.env.ZOHO_DEAL_ASSIGNMENT_RULE_ID || '';
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
+// Slack user tagged on every new referral to draft and send the proposal (Sneha Dubey).
+const PROPOSAL_OWNER_ID = process.env.PROPOSAL_OWNER_ID || 'U0BHE147ZDG';
 
 // Service_List picklist pulled from the live Finanshels Zoho CRM (Deals module).
 // t = display label shown in Slack, v = Zoho actual_value sent to the API.
@@ -395,7 +397,7 @@ async function handleViewSubmission(payload, res) {
     const d = JSON.parse(payload.view.private_metadata);
     try {
       const dealId = await createZohoDeal(d);
-      const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>)`;
+      const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>). <@${PROPOSAL_OWNER_ID}> please draft and send the proposal.`;
       const summaryFields = [
         { type: 'mrkdwn', text: `*Client:*\n${d.name}` },
         { type: 'mrkdwn', text: `*Referred by:*\n${d.referrer}` },
@@ -418,6 +420,13 @@ async function handleViewSubmission(payload, res) {
           },
         },
         { type: 'section', fields: summaryFields },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:memo: <@${PROPOSAL_OWNER_ID}> please draft and send the proposal for *${d.name}*.`,
+          },
+        },
         {
           type: 'context',
           elements: [
