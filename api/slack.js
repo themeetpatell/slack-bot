@@ -11,11 +11,20 @@ const ZOHO_API_URL = process.env.ZOHO_API_URL || 'https://www.zohoapis.com';
 const LEAD_SOURCE = process.env.LEAD_SOURCE || 'Ops Team';
 const DEAL_STAGE = process.env.DEAL_STAGE || 'Qualification';
 const DEAL_PIPELINE = process.env.DEAL_PIPELINE || 'General Sales';
-const DEAL_ASSIGNMENT_RULE_ID = process.env.ZOHO_DEAL_ASSIGNMENT_RULE_ID || '';
 // #internal-client-refferals — where /refer is allowed and summaries are posted.
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || 'C0BRC5SQF1P';
-// Slack user tagged on every new referral to draft and send the proposal (Sneha Dubey).
-const PROPOSAL_OWNER_ID = process.env.PROPOSAL_OWNER_ID || 'U0BHE147ZDG';
+// Slack users tagged on every new referral to draft and send the proposal
+// (Emil Rizwan, Sethunath, Muhammad Hisham).
+const PROPOSAL_TAG_IDS = (process.env.PROPOSAL_TAG_IDS || 'U07R06LSDL5,U0AERR4BNNB,U097VRURBQT')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// Zoho users who own referral deals, assigned round-robin (Sethu Nath, Muhammad Hisham).
+const DEAL_OWNERS = [
+  { zohoId: '5847102000061836001', name: 'Sethu Nath' },
+  { zohoId: '5847102000029433003', name: 'Muhammad Hisham' },
+];
 
 // Service_List picklist pulled from the live Finanshels Zoho CRM (Deals module).
 // t = display label shown in Slack, v = Zoho actual_value sent to the API.
@@ -132,10 +141,34 @@ async function zohoAccessToken() {
   return j.access_token;
 }
 
+// Round-robin: whoever did NOT get the most recent deal gets this one.
+// Falls back to minute-based alternation if the lookup fails, so a read
+// error never blocks deal creation.
+async function pickDealOwner(token) {
+  const ids = DEAL_OWNERS.map((o) => o.zohoId);
+  try {
+    const r = await fetch(
+      `${ZOHO_API_URL}/crm/v6/Deals?fields=Owner&sort_by=Created_Time&sort_order=desc&per_page=20`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    const j = await r.json();
+    const last = (j.data || []).find((deal) => deal.Owner && ids.includes(deal.Owner.id));
+    if (last) {
+      const idx = ids.indexOf(last.Owner.id);
+      return DEAL_OWNERS[(idx + 1) % DEAL_OWNERS.length];
+    }
+  } catch {
+    // fall through to time-based fallback
+  }
+  return DEAL_OWNERS[new Date().getUTCMinutes() % DEAL_OWNERS.length];
+}
+
 async function createZohoDeal(d) {
   const token = await zohoAccessToken();
+  const owner = await pickDealOwner(token);
 
   const record = {
+    Owner: { id: owner.zohoId },
     Deal_Name: d.name,
     Stage: DEAL_STAGE,
     Pipeline: DEAL_PIPELINE,
@@ -147,8 +180,9 @@ async function createZohoDeal(d) {
   if (d.referrer) record.Internal_Referrer = d.referrer;
   if (d.client) record.Referring_Client = d.client;
 
+  // Owner is assigned explicitly (round-robin) — no lar_id, an assignment
+  // rule would override the owner we just picked.
   const body = { data: [record] };
-  if (DEAL_ASSIGNMENT_RULE_ID) body.lar_id = DEAL_ASSIGNMENT_RULE_ID;
 
   const r = await fetch(`${ZOHO_API_URL}/crm/v6/Deals`, {
     method: 'POST',
@@ -163,7 +197,7 @@ async function createZohoDeal(d) {
   if (!item || item.status !== 'success') {
     throw new Error(`Zoho rejected the deal: ${JSON.stringify((item && item.message) || j)}`);
   }
-  return item.details.id;
+  return { dealId: item.details.id, owner };
 }
 
 // ---------- Slack views ----------
@@ -397,8 +431,9 @@ async function handleViewSubmission(payload, res) {
   if (cb === 'lead_confirm') {
     const d = JSON.parse(payload.view.private_metadata);
     try {
-      const dealId = await createZohoDeal(d);
-      const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>). <@${PROPOSAL_OWNER_ID}> please draft and send the proposal.`;
+      const { dealId, owner } = await createZohoDeal(d);
+      const proposalTags = PROPOSAL_TAG_IDS.map((id) => `<@${id}>`).join(' ');
+      const fallbackText = `New referral: ${d.name} · ${d.email} · ${d.phone} — referred by ${d.referrer} (<@${d.user}>). ${proposalTags} please draft and send the proposal. Deal assigned to ${owner.name}.`;
       const summaryFields = [
         { type: 'mrkdwn', text: `*Client:*\n${d.name}` },
         { type: 'mrkdwn', text: `*Referred by:*\n${d.referrer}` },
@@ -425,7 +460,7 @@ async function handleViewSubmission(payload, res) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:memo: <@${PROPOSAL_OWNER_ID}> please draft and send the proposal for *${d.name}*.`,
+            text: `:memo: ${proposalTags} please draft and send the proposal for *${d.name}*.`,
           },
         },
         {
@@ -433,7 +468,7 @@ async function handleViewSubmission(payload, res) {
           elements: [
             {
               type: 'mrkdwn',
-              text: `Created as a Deal in Zoho CRM · Deal ID \`${dealId}\` · ${DEAL_PIPELINE} / ${DEAL_STAGE}`,
+              text: `Created as a Deal in Zoho CRM · Deal ID \`${dealId}\` · ${DEAL_PIPELINE} / ${DEAL_STAGE} · Assigned to ${owner.name}`,
             },
           ],
         },
